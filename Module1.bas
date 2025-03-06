@@ -20,8 +20,6 @@ Sub GenerateVisitorCalendar()
     Dim checkDate As Date
     Dim lastRow As Long, lastCol As Long
     
-    
-    
     ' Define the worksheets
     Set wsData = ThisWorkbook.Sheets("PlannedVisitorsSheet") ' Data sheet
     Set ws = ThisWorkbook.Sheets("PlannedVisitorsSheet") ' Calendar sheet
@@ -34,36 +32,61 @@ Sub GenerateVisitorCalendar()
     currentMonth = Month(Date)
     currentYear = Year(Date)
 
-' Clear previous calendar data only in the intended range
-If Not ws Is Nothing Then
-    ' Get absolute last row of the sheet to ensure I clear everything
-    lastRow = ws.Rows.Count
-    lastCol = ws.Columns.Count
+    ' Clear previous calendar data only in the intended range
+    If Not ws Is Nothing Then
+        ' Get absolute last row of the sheet to ensure I clear everything
+        lastRow = ws.Rows.Count
+        lastCol = ws.Columns.Count
+        
+        ' Clear the entire calendar area (from column L to end of sheet)
+        ws.Range(ws.Cells(1, startColumn), ws.Cells(lastRow, lastCol)).Clear
+    Else
+        MsgBox "Error: Worksheet not found!", vbExclamation, "Calendar Error"
+        Exit Sub
+    End If
+
+    ' Initialize collections to store visitor information for each day
+    Dim visitorDict As Object
+    Set visitorDict = CreateObject("Scripting.Dictionary")
     
-    ' Clear the entire calendar area (from column L to end of sheet)
-    ws.Range(ws.Cells(1, startColumn), ws.Cells(lastRow, lastCol)).Clear
-Else
-    MsgBox "Error: Worksheet not found!", vbExclamation, "Calendar Error"
-    Exit Sub
-End If
+    ' Populate visitor dictionary
+    Set dataRange = wsData.Range("A2:A" & wsData.Cells(Rows.Count, 1).End(xlUp).Row)
+    For Each cell In dataRange
+        If IsDate(cell.Value) Then
+            Dim visitorDate As Date
+            visitorDate = cell.Value
+            
+            ' Create or add to the list of visitors for this date
+            If Not visitorDict.Exists(visitorDate) Then
+                visitorDict.Add visitorDate, cell.Offset(0, 1).Value & " - " & cell.Offset(0, 2).Value
+            Else
+                visitorDict(visitorDate) = visitorDict(visitorDate) & vbNewLine & cell.Offset(0, 1).Value & " - " & cell.Offset(0, 2).Value
+            End If
+        End If
+    Next cell
 
     ' Initialize collections to store visitor counts per day
     Dim visitorArray() As Integer
     ReDim visitorArray(31) ' Max days in a month
     
-       ' Define a consistent structure
+    ' Define a consistent structure
     Const TITLE_ROW_HEIGHT As Integer = 1     ' Height of month title
     Const HEADER_ROW_HEIGHT As Integer = 1    ' Height of day headers
     Const SPACING_AFTER_MONTH As Integer = 2  ' Space between months
     
-    
     ' Loop through the next 3 months
     rowNum = 1 ' Start from the first row
     For monthCounter = 0 To 2
+        ' adjust start point for each month
+        firstWeekDay = Weekday(DateSerial(currentYear, currentMonth, 1)) ' 1 = Sunday, 7 = Saturday
+        firstWeekDay = firstWeekDay - 1
+        If firstWeekDay = 0 Then firstWeekDay = 7
+
+
+    
         ' Get first and last day of the target month
         calendarStart = DateSerial(currentYear, currentMonth + monthCounter, 1)
         endDate = DateSerial(currentYear, currentMonth + monthCounter + 1, 0)
-
 
         ' Store the starting row for this month
         Dim monthStartRow As Integer
@@ -109,75 +132,86 @@ End If
             End If
         Next cell
 
-        ' Find the first day of the week for this month
+       ' Calculate first day of the month position (0 = Monday, 6 = Sunday)
         Dim firstDayCol As Integer
-        firstDayCol = Weekday(calendarStart, vbMonday) ' 1=Monday, 7=Sunday
+        ' Get the weekday of 1st of month (1=Sunday, 2=Monday, ..., 7=Saturday in vbSunday)
+        Dim firstOfMonth As Date
+        firstOfMonth = DateSerial(currentYear, currentMonth + monthCounter, 1)
         
+        ' Convert to 0=Monday to 6=Sunday
+        firstDayCol = (Weekday(firstOfMonth, vbSunday) + 5) Mod 7
+                
         ' Process each week until we've passed the end of the month
         Dim currentDay As Integer
         currentDay = 1
-        colNum = firstDayCol ' Start with the correct weekday column
-
+        
         ' Continue until we've processed all days in the month
         Do While currentDay <= Day(endDate)
             ' Find max visitors for this week to determine row height
             weekMaxVisitors = 0
-            Dim tempDay As Integer
+            Dim tempDay As Integer, tempCol As Integer
+            tempCol = firstDayCol
+            
             For i = 0 To 6
-                tempDay = currentDay + i
-                If tempDay <= Day(endDate) Then
-                    If visitorArray(tempDay) > weekMaxVisitors Then
-                        weekMaxVisitors = visitorArray(tempDay)
+                If tempCol < 7 Then  ' Only check days within this week
+                    tempDay = currentDay + i
+                    If tempDay <= Day(endDate) Then
+                        If visitorArray(tempDay) > weekMaxVisitors Then
+                            weekMaxVisitors = visitorArray(tempDay)
+                        End If
                     End If
+                    tempCol = tempCol + 1
                 End If
             Next i
+            
+            ' Ensure at least 1 row for visitors
+            If weekMaxVisitors = 0 Then weekMaxVisitors = 1
             
             ' Start row for this week's dates
             dateRow = rowNum
             
-          
             ' Process each day of the week
             Dim dayCol As Integer
-            For dayCol = 1 To 7
-                ' Only process days that are part of this month
-                If colNum <= 7 Then
-                    ' We're in the first week and might need to skip some days
-                    If dayCol >= firstDayCol Or currentDay > 1 Then
-                        ' don't exceed the month
-                        If currentDay <= Day(endDate) Then
-                            thisDate = DateSerial(currentYear, currentMonth + monthCounter, currentDay)
-                            
-                            ' Write the date
-                            ws.Cells(dateRow, startColumn + dayCol - 1).Value = thisDate
-                            ws.Cells(dateRow, startColumn + dayCol - 1).NumberFormat = "DD-MMM"
-                            
-                            ' Add visitors for this date
-                            visRow = dateRow + 1
-                            
-                            Dim insertedVisitors As Object
-                            Set insertedVisitors = CreateObject("Scripting.Dictionary")
-                            
-                            For Each cell In dataRange
-                                If Not IsEmpty(cell.Value) Then
-                                    If cell.Value = thisDate Then
-                                        visitorInfo = cell.Offset(0, 1).Value & " - " & cell.Offset(0, 2).Value
-                                        
-                                        ' Check if this visitor has already been added
-                                        If Not insertedVisitors.exists(visitorInfo) Then
-                                            ws.Cells(visRow, startColumn + dayCol - 1).Value = visitorInfo
-                                            ws.Cells(visRow, startColumn + dayCol - 1).Font.Color = RGB(200, 0, 200)
-                                            insertedVisitors.Add visitorInfo, True
-                                            visRow = visRow + 1
-                                        End If
+            For dayCol = 0 To 6  ' 0=Monday, 6=Sunday
+                ' Calculate the actual column to place this day
+                Dim actualCol As Integer
+                actualCol = startColumn + dayCol
+                
+                ' Check if we should place a day in this position
+                If currentDay <= Day(endDate) Then
+                    ' In the first week, only place dates from the firstDayCol onwards
+                    If dayCol >= firstDayCol Or rowNum > (monthStartRow + TITLE_ROW_HEIGHT + HEADER_ROW_HEIGHT) Then
+                        thisDate = DateSerial(currentYear, currentMonth + monthCounter, currentDay)
+                        
+                        ' Write the date
+                        ws.Cells(dateRow, actualCol).Value = thisDate
+                        ws.Cells(dateRow, actualCol).NumberFormat = "DD-MMM"
+                        
+                        ' Add visitors for this date
+                        visRow = dateRow + 1
+                        
+                        Dim insertedVisitors As Object
+                        Set insertedVisitors = CreateObject("Scripting.Dictionary")
+                        
+                        For Each cell In dataRange
+                            If Not IsEmpty(cell.Value) Then
+                                If cell.Value = thisDate Then
+                                    visitorInfo = cell.Offset(0, 1).Value & " - " & cell.Offset(0, 2).Value
+                                    
+                                    ' Check if this visitor has already been added
+                                    If Not insertedVisitors.Exists(visitorInfo) Then
+                                        ws.Cells(visRow, actualCol).Value = visitorInfo
+                                        ws.Cells(visRow, actualCol).Font.Color = RGB(200, 0, 200)
+                                        insertedVisitors.Add visitorInfo, True
+                                        visRow = visRow + 1
                                     End If
                                 End If
-                            Next cell
-            
-                            currentDay = currentDay + 1
-                        End If
+                            End If
+                        Next cell
+        
+                        currentDay = currentDay + 1
                     End If
                 End If
-                colNum = colNum + 1
             Next dayCol
             
             ' Reset column for next week
@@ -186,17 +220,14 @@ End If
             rowNum = rowNum + weekMaxVisitors + 2
             firstDayCol = 1
         Loop
-        
 
         ' add consistent spacing
         rowNum = rowNum + SPACING_AFTER_MONTH
     Next monthCounter
 
-
     ' Auto-adjust column width
     ws.Cells.Columns.AutoFit
     
-   
     ' Add borders only to the calendar area
     Dim calendarRange As Range
     Set calendarRange = ws.Range(ws.Cells(1, startColumn), ws.Cells(rowNum - 1, startColumn + 6))
